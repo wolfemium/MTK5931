@@ -640,7 +640,6 @@
 #include "gl_os.h"
 #include "debug.h"
 #include "wlan_lib.h"
-#include "gl_wext.h"
 #include "gl_cfg80211.h"
 #include "precomp.h"
 
@@ -675,7 +674,6 @@ typedef struct _WLANDEV_INFO_T {
 
 MODULE_AUTHOR(NIC_AUTHOR);
 MODULE_DESCRIPTION(NIC_DESC);
-MODULE_SUPPORTED_DEVICE(NIC_NAME);
 
 /* WCNCR 00002676, 
 keep OS wake up for 100ms after sdio interrupt happen,
@@ -710,7 +708,7 @@ static SUB_MODULE_HANDLER rSubModHandler[SUB_MODULE_NUM] = {{NULL}};
 
 #define CHAN2G(_channel, _freq, _flags)         \
     {                                           \
-    .band               = IEEE80211_BAND_2GHZ,  \
+    .band               = NL80211_BAND_2GHZ,  \
     .center_freq        = (_freq),              \
     .hw_value           = (_channel),           \
     .flags              = (_flags),             \
@@ -736,7 +734,7 @@ static struct ieee80211_channel mtk_2ghz_channels[] = {
 
 #define CHAN5G(_channel, _flags)                    \
     {                                               \
-    .band               = IEEE80211_BAND_5GHZ,      \
+    .band               = NL80211_BAND_5GHZ,      \
     .center_freq        = 5000 + (5 * (_channel)),  \
     .hw_value           = (_channel),               \
     .flags              = (_flags),                 \
@@ -766,7 +764,13 @@ static struct ieee80211_channel mtk_5ghz_channels[] = {
     CHAN5G(216, 0),
 };
 
-/* for cfg80211 - rate table */
+/* for cfg80211 - rate table (RATETAB_ENT was dropped from cfg80211.h) */
+#define RATETAB_ENT(_rate, _rateid, _flags) \
+    {                                       \
+    .bitrate    = (_rate),                  \
+    .hw_value   = (_rateid),                \
+    .flags      = (_flags),                 \
+    }
 static struct ieee80211_rate mtk_rates[] = {
     RATETAB_ENT(10,   0x1000,   0),
     RATETAB_ENT(20,   0x1001,   0),
@@ -809,7 +813,7 @@ static struct ieee80211_rate mtk_rates[] = {
 
 /* public for both Legacy Wi-Fi / P2P access */
 struct ieee80211_supported_band mtk_band_2ghz = {
-    .band       = IEEE80211_BAND_2GHZ,
+    .band       = NL80211_BAND_2GHZ,
     .channels   = mtk_2ghz_channels,
     .n_channels = ARRAY_SIZE(mtk_2ghz_channels),
     .bitrates   = mtk_g_rates,
@@ -819,7 +823,7 @@ struct ieee80211_supported_band mtk_band_2ghz = {
 
 /* public for both Legacy Wi-Fi / P2P access */
 struct ieee80211_supported_band mtk_band_5ghz = {
-    .band       = IEEE80211_BAND_5GHZ,
+    .band       = NL80211_BAND_5GHZ,
     .channels   = mtk_5ghz_channels,
     .n_channels = ARRAY_SIZE(mtk_5ghz_channels),
     .bitrates   = mtk_a_rates,
@@ -854,12 +858,6 @@ static struct cfg80211_ops mtk_wlan_ops = {
     .set_pmksa              = mtk_cfg80211_set_pmksa,
     .del_pmksa              = mtk_cfg80211_del_pmksa,
     .flush_pmksa            = mtk_cfg80211_flush_pmksa,
-
-    /* Action Frame TX/RX */
-    .remain_on_channel          = mtk_cfg80211_remain_on_channel,
-    .cancel_remain_on_channel   = mtk_cfg80211_cancel_remain_on_channel,
-    .mgmt_tx                    = mtk_cfg80211_mgmt_tx,
-    .mgmt_tx_cancel_wait        = mtk_cfg80211_mgmt_tx_cancel_wait,
     #ifdef CONFIG_NL80211_TESTMODE
     .testmode_cmd               = mtk_cfg80211_testmode_cmd,
     #endif
@@ -927,7 +925,8 @@ static const UINT_16 au16Wlan1dToQueueIdx[8] = { 1, 0, 0, 1, 2, 2, 3, 3 };
 static UINT_16
 wlanSelectQueue(
     struct net_device *dev,
-    struct sk_buff *skb)
+    struct sk_buff *skb,
+    struct net_device *sb_dev)
 {
     skb->priority = _cfg80211_classify8021d(skb);
 
@@ -1357,55 +1356,6 @@ wlanGetDevIdx (
 * \retval OTHER The execution of IOCTL command is failed.
 */
 /*----------------------------------------------------------------------------*/
-int
-wlanDoIOCTL(
-    struct net_device *prDev,
-    struct ifreq *prIFReq,
-    int i4Cmd
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-    int ret = 0;
-
-    /* Verify input parameters for the following functions */
-    ASSERT(prDev && prIFReq);
-    if (!prDev || !prIFReq) {
-        DBGLOG(INIT, WARN, ("%s Invalid input data\n", __FUNCTION__));
-        return -EINVAL;
-    }
-
-    prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prDev));
-    ASSERT(prGlueInfo);
-    if (!prGlueInfo) {
-        DBGLOG(INIT, WARN, ("%s No glue info\n", __FUNCTION__));
-        return -EFAULT;
-    }
-
-    if (prGlueInfo->u4ReadyFlag == 0) {
-        return -EINVAL;
-    }
-
-    printk ("ioctl %x\n", i4Cmd);
-
-    if (i4Cmd == SIOCGIWPRIV) {
-        /* 0x8B0D, get private ioctl table */
-        ret = wext_get_priv(prDev, prIFReq);
-    }
-    else if ((i4Cmd >= SIOCIWFIRST) && (i4Cmd < SIOCIWFIRSTPRIV)) {
-        /* 0x8B00 ~ 0x8BDF, wireless extension region */
-        ret = wext_support_ioctl(prDev, prIFReq, i4Cmd);
-    }
-    else if ((i4Cmd >= SIOCIWFIRSTPRIV) && (i4Cmd < SIOCIWLASTPRIV)) {
-        /* 0x8BE0 ~ 0x8BFF, private ioctl region */
-        ret = priv_support_ioctl(prDev, prIFReq, i4Cmd);
-    }
-    else {
-        DBGLOG(INIT, WARN, ("Unexpected ioctl command: 0x%04x\n", i4Cmd));
-        /* return 0 for safe? */
-    }
-
-    return ret;
-} /* end of wlanDoIOCTL() */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -1880,7 +1830,9 @@ wlanStop(
     GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
     if(prScanRequest) {
-        cfg80211_scan_done(prScanRequest, TRUE);
+        struct cfg80211_scan_info rScanInfo = { .aborted = true };
+
+        cfg80211_scan_done(prScanRequest, &rScanInfo);
     }
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 26)
@@ -2062,7 +2014,6 @@ static const struct net_device_ops wlan_netdev_ops = {
 	.ndo_set_multicast_list	= wlanSetMulticastList,
 #endif
 	.ndo_get_stats		= wlanGetStats,
-	.ndo_do_ioctl		= wlanDoIOCTL,
 	.ndo_start_xmit		= wlanHardStartXmit,
 	.ndo_init		= wlanInit,
 	.ndo_uninit		= wlanUninit,
@@ -2126,16 +2077,12 @@ wlanNetCreate(
     prWdev->wiphy->max_scan_ssids   = 1;    /* FIXME: for combo scan */
     prWdev->wiphy->max_scan_ie_len = 512;
     prWdev->wiphy->interface_modes  = BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_ADHOC);
-    prWdev->wiphy->bands[IEEE80211_BAND_2GHZ] = &mtk_band_2ghz;
-    prWdev->wiphy->bands[IEEE80211_BAND_5GHZ] = &mtk_band_5ghz;
+    prWdev->wiphy->bands[NL80211_BAND_2GHZ] = &mtk_band_2ghz;
     prWdev->wiphy->signal_type      = CFG80211_SIGNAL_TYPE_MBM;
     prWdev->wiphy->cipher_suites    = (const u32 *)mtk_cipher_suites;
     prWdev->wiphy->n_cipher_suites  = ARRAY_SIZE(mtk_cipher_suites);
-    #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0) 
-    prWdev->wiphy->flags            = WIPHY_FLAG_CUSTOM_REGULATORY | WIPHY_FLAG_SUPPORTS_FW_ROAM;
-    #else
-    prWdev->wiphy->flags            = WIPHY_FLAG_CUSTOM_REGULATORY;
-    #endif	
+    prWdev->wiphy->flags            = WIPHY_FLAG_SUPPORTS_FW_ROAM;
+    prWdev->wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
     //4 <2> Create Glue structure
     prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(prWdev->wiphy);
     if (!prGlueInfo) {
@@ -2145,7 +2092,7 @@ wlanNetCreate(
 
     //4 <3> Initial Glue structure
     //4 <3.1> create net device 
-    prGlueInfo->prDevHandler = alloc_netdev_mq(sizeof(P_GLUE_INFO_T), NIC_INF_NAME, ether_setup, CFG_MAX_TXQ_NUM);
+    prGlueInfo->prDevHandler = alloc_netdev_mq(sizeof(P_GLUE_INFO_T), NIC_INF_NAME, NET_NAME_ENUM, ether_setup, CFG_MAX_TXQ_NUM);
 
     DBGLOG(INIT, INFO, ("net_device prDev(0x%p) allocated\n", prGlueInfo->prDevHandler));
     if (!prGlueInfo->prDevHandler) {
@@ -2157,9 +2104,6 @@ wlanNetCreate(
     *((P_GLUE_INFO_T *) netdev_priv(prGlueInfo->prDevHandler)) = prGlueInfo;
 
     prGlueInfo->prDevHandler->netdev_ops = &wlan_netdev_ops;
-#ifdef CONFIG_WIRELESS_EXT
-    prGlueInfo->prDevHandler->wireless_handlers = &wext_handler_def;
-#endif
     netif_carrier_off(prGlueInfo->prDevHandler);
     netif_tx_stop_all_queues(prGlueInfo->prDevHandler);
 
@@ -2208,10 +2152,6 @@ wlanNetCreate(
 
     prGlueInfo->prAdapter = prAdapter;
 
-#ifdef CONFIG_CFG80211_WEXT
-    //4 <5> Use wireless extension to replace IOCTL
-    prWdev->wiphy->wext = &wext_handler_def;
-#endif
 
     goto netcreate_done;
 
@@ -2560,6 +2500,7 @@ wlanProbe(
     P_ADAPTER_T prAdapter = NULL;
     INT_32 i4Status = 0;
     BOOL bRet = FALSE;
+    BOOLEAN fgIrqClaimed = FALSE;
 
 
     do {
@@ -2631,15 +2572,14 @@ wlanProbe(
 
         //prGlueInfo->main_thread = kthread_run(tx_thread, prGlueInfo->prDevHandler, "tx_thread");
 
-        //4 <4> Setup IRQ
         prWlandevInfo = &arWlanDevInfo[i4DevIdx];
 
-        //i4Status = glBusSetIrq(prWdev->netdev, NULL, *((P_GLUE_INFO_T *) netdev_priv(prWdev->netdev)));
-
+        i4Status = glBusSetIrq(prWdev->netdev, NULL, prGlueInfo);
         if (i4Status != WLAN_STATUS_SUCCESS) {
-            DBGLOG(INIT, ERROR, ("wlanProbe: Set IRQ error\n"));
+            DBGLOG(INIT, ERROR, ("wlanProbe: Set IRQ error (%d)\n", i4Status));
             break;
         }
+        fgIrqClaimed = TRUE;
 
         prGlueInfo->i4DevIdx = i4DevIdx;
 
@@ -2728,8 +2668,8 @@ bailout:
                 DBGLOG(INIT, WARN, ("set MAC addr fail 0x%lx\n", rStatus));
                 prGlueInfo->u4ReadyFlag = 0;
             } else {
-                memcpy(prGlueInfo->prDevHandler->dev_addr, &MacAddr.sa_data, ETH_ALEN);
-                memcpy(prGlueInfo->prDevHandler->perm_addr, prGlueInfo->prDevHandler->dev_addr, ETH_ALEN);
+                eth_hw_addr_set(prGlueInfo->prDevHandler, (const u8 *)MacAddr.sa_data);
+                memcpy(prGlueInfo->prDevHandler->perm_addr, MacAddr.sa_data, ETH_ALEN);
 
                 /* card is ready */
                 prGlueInfo->u4ReadyFlag = 1;
@@ -2770,7 +2710,6 @@ bailout:
             break;
         }
 
-        glRegisterEarlySuspend(&mt6620_early_suspend_desc, wlan_early_suspend, wlan_late_resume);
         wlanRegisterNotifier();
         //4 <6> Initialize /proc filesystem
 #ifdef WLAN_INCLUDE_PROC
@@ -2796,6 +2735,10 @@ bailout:
 #endif
     }
     while (FALSE);
+
+    if (i4Status != 0 && fgIrqClaimed && prWdev) {
+        glBusFreeIrq(prWdev->netdev, prGlueInfo);
+    }
 
     return i4Status;
 } /* end of wlanProbe() */
@@ -2888,7 +2831,7 @@ wlanRemove(
 
     kalMemSet(&(prGlueInfo->prAdapter->rWlanInfo), 0, sizeof(WLAN_INFO_T));
 
-    flush_delayed_work_sync(&workq);
+    flush_delayed_work(&workq);
 
     down(&g_halt_sem);
     g_u4HaltFlag = 1;
@@ -2935,7 +2878,6 @@ wlanRemove(
     wlanNetDestroy(prDev->ieee80211_ptr);
     prDev = NULL;
 
-    glUnregisterEarlySuspend(&mt6620_early_suspend_desc);
     wlanUnregisterNotifier();
     return;
 } /* end of wlanRemove() */
@@ -2949,8 +2891,6 @@ wlanRemove(
 * \retval 0     Success
 */
 /*----------------------------------------------------------------------------*/
-extern  void sdio_reinit(void);
-extern void extern_wifi_set_enable(int is_on);
 //extern int axp_gpio_set_io(int gpio, int io_state);
 //extern int axp_gpio_set_value(int gpio, int value);
 //1 Module Entry Point
@@ -2962,11 +2902,6 @@ static int __init initWlan(void)
     //axp_gpio_set_io(0,1);
 	//axp_gpio_set_value(0, 1);
     
-    extern_wifi_set_enable(0);
-	mdelay(200);
-	extern_wifi_set_enable(1);
-	mdelay(200);
-	sdio_reinit();
 
     /* memory pre-allocation */
     kalInitIOBuffer();
@@ -3014,8 +2949,6 @@ static VOID __exit exitWlan(void)
     /* free pre-allocated memory */
     kalUninitIOBuffer();
 
-    extern_wifi_set_enable(0);
-
     DBGLOG(INIT, INFO, ("exitWlan\n"));
 
     return;
@@ -3023,122 +2956,4 @@ static VOID __exit exitWlan(void)
 
 module_init(initWlan);
 module_exit(exitWlan);
-#if 0
-/* export necessary symbol for p2p driver using */
-#if CFG_ENABLE_WIFI_DIRECT
-EXPORT_SYMBOL(wlanSubModRegisterInitExit);
-EXPORT_SYMBOL(wlanSubModExit);
-EXPORT_SYMBOL(wlanSubModInit);
-
-EXPORT_SYMBOL(nicPmIndicateBssCreated);
-EXPORT_SYMBOL(rlmProcessAssocRsp);
-EXPORT_SYMBOL(kalSetEvent);
-EXPORT_SYMBOL(rlmBssInitForAPandIbss);
-EXPORT_SYMBOL(kalEnqueueCommand);
-EXPORT_SYMBOL(nicIncreaseTxSeqNum);
-EXPORT_SYMBOL(nicCmdEventQueryAddress);
-EXPORT_SYMBOL(bssCreateStaRecFromBssDesc);
-EXPORT_SYMBOL(rlmBssAborted);
-EXPORT_SYMBOL(cnmStaRecResetStatus);
-EXPORT_SYMBOL(mqmProcessAssocRsp);
-EXPORT_SYMBOL(nicTxReturnMsduInfo);
-EXPORT_SYMBOL(nicTxEnqueueMsdu);
-EXPORT_SYMBOL(wlanProcessSecurityFrame);
-EXPORT_SYMBOL(nicChannelNum2Freq);
-EXPORT_SYMBOL(nicUpdateBss);
-EXPORT_SYMBOL(wlanSendSetQueryCmd);
-EXPORT_SYMBOL(cnmStaRecAlloc);
-EXPORT_SYMBOL(cnmTimerInitTimer);
-EXPORT_SYMBOL(rateGetRateSetFromIEs);
-EXPORT_SYMBOL(nicOidCmdTimeoutCommon);
-EXPORT_SYMBOL(cnmStaRecChangeState);
-EXPORT_SYMBOL(rateGetDataRatesFromRateSet);
-EXPORT_SYMBOL(cnmMgtPktAlloc);
-EXPORT_SYMBOL(cnmMgtPktFree);
-EXPORT_SYMBOL(wextSrchDesiredWPAIE);
-EXPORT_SYMBOL(nicRxReturnRFB);
-EXPORT_SYMBOL(cnmTimerStartTimer);
-EXPORT_SYMBOL(cmdBufAllocateCmdInfo);
-EXPORT_SYMBOL(cnmGetStaRecByAddress);
-EXPORT_SYMBOL(nicMediaStateChange);
-EXPORT_SYMBOL(bssUpdateBeaconContent);
-EXPORT_SYMBOL(kalIoctl);
-EXPORT_SYMBOL(nicActivateNetwork);
-EXPORT_SYMBOL(nicDeactivateNetwork);
-EXPORT_SYMBOL(kalRandomNumber);
-EXPORT_SYMBOL(nicCmdEventSetCommon);
-EXPORT_SYMBOL(cnmTimerStopTimer);
-EXPORT_SYMBOL(nicIncreaseCmdSeqNum);
-EXPORT_SYMBOL(authSendDeauthFrame);
-EXPORT_SYMBOL(cnmMemAlloc);
-EXPORT_SYMBOL(nicPmIndicateBssAbort);
-EXPORT_SYMBOL(nicCmdEventSetIpAddress);
-EXPORT_SYMBOL(mboxSendMsg);
-EXPORT_SYMBOL(scanSearchBssDescByBssid);
-EXPORT_SYMBOL(bssRemoveStaRecFromClientList);
-EXPORT_SYMBOL(assocProcessRxDisassocFrame);
-EXPORT_SYMBOL(authProcessRxDeauthFrame);
-EXPORT_SYMBOL(cnmStaRecFree);
-EXPORT_SYMBOL(rNonHTPhyAttributes);
-EXPORT_SYMBOL(rNonHTApModeAttributes);
-EXPORT_SYMBOL(cnmMemFree);
-EXPORT_SYMBOL(wlanExportGlueInfo);
-EXPORT_SYMBOL(bssInitForAP);
-EXPORT_SYMBOL(nicPmIndicateBssConnected);
-EXPORT_SYMBOL(rlmRspGenerateHtOpIE);
-EXPORT_SYMBOL(bssGenerateExtSuppRate_IE);
-EXPORT_SYMBOL(rlmRspGenerateErpIE);
-EXPORT_SYMBOL(rlmRspGenerateHtCapIE);
-EXPORT_SYMBOL(cnmGetStaRecByIndex);
-EXPORT_SYMBOL(rsnGenerateWpaNoneIE);
-EXPORT_SYMBOL(rlmRspGenerateExtCapIE);
-EXPORT_SYMBOL(rsnGenerateRSNIE);
-EXPORT_SYMBOL(rsnParseRsnIE);
-#if CFG_SUPPORT_WPS
-EXPORT_SYMBOL(wextSrchDesiredWPSIE);
-#endif
-EXPORT_SYMBOL(mboxDummy);
-EXPORT_SYMBOL(saaFsmRunEventStart);
-EXPORT_SYMBOL(saaFsmRunEventAbort);
-EXPORT_SYMBOL(cnmP2PIsPermitted);
-EXPORT_SYMBOL(cnmBss40mBwPermitted);
-EXPORT_SYMBOL(mqmGenerateWmmParamIE);
-EXPORT_SYMBOL(cnmPreferredChannel);
-EXPORT_SYMBOL(bssAddStaRecToClientList);
-EXPORT_SYMBOL(nicQmUpdateWmmParms);
-EXPORT_SYMBOL(qmFreeAllByNetType);
-EXPORT_SYMBOL(wlanQueryInformation);
-EXPORT_SYMBOL(nicConfigPowerSaveProfile);
-EXPORT_SYMBOL(scanSearchExistingBssDesc);
-EXPORT_SYMBOL(scanAllocateBssDesc);
-EXPORT_SYMBOL(wlanProcessCommandQueue);
-EXPORT_SYMBOL(wlanAcquirePowerControl);
-EXPORT_SYMBOL(wlanReleasePowerControl);
-EXPORT_SYMBOL(wlanReleasePendingCMDbyNetwork);
-#if DBG
-EXPORT_SYMBOL(aucDebugModule);
-EXPORT_SYMBOL(fgIsBusAccessFailed);
-EXPORT_SYMBOL(allocatedMemSize);
-EXPORT_SYMBOL(dumpMemory8);
-EXPORT_SYMBOL(dumpMemory32);
-#endif
-EXPORT_SYMBOL(rlmDomainIsLegalChannel);
-EXPORT_SYMBOL(scnQuerySparseChannel);
-EXPORT_SYMBOL(rlmDomainGetChnlList);
-EXPORT_SYMBOL(p2pSetMulticastListWorkQueueWrapper);
-EXPORT_SYMBOL(nicUpdateRSSI);
-EXPORT_SYMBOL(nicCmdEventQueryLinkQuality);
-EXPORT_SYMBOL(kalGetMediaStateIndicated);
-EXPORT_SYMBOL(nicFreq2ChannelNum);
-EXPORT_SYMBOL(assocSendDisAssocFrame);
-EXPORT_SYMBOL(nicUpdateBeaconIETemplate);
-EXPORT_SYMBOL(rsnParseCheckForWFAInfoElem);
-EXPORT_SYMBOL(kalClearMgmtFramesByNetType);
-EXPORT_SYMBOL(kalClearSecurityFramesByNetType);
-EXPORT_SYMBOL(nicFreePendingTxMsduInfoByNetwork);
-EXPORT_SYMBOL(bssComposeBeaconProbeRespFrameHeaderAndFF);
-EXPORT_SYMBOL(bssBuildBeaconProbeRespFrameCommonIEs);
-EXPORT_SYMBOL(wlanoidSetWapiAssocInfo);
-EXPORT_SYMBOL(wlanoidSetWSCAssocInfo);
-#endif
-#endif
+MODULE_FIRMWARE("mediatek/mt5931/WIFI_RAM_CODE");

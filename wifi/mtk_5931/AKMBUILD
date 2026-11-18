@@ -1,0 +1,8 @@
+# AKMS build definition for the MediaTek MT5931 SDIO Wi-Fi driver.
+modname=mt5931
+modver=2013.1
+built_modules='mt5931.ko'
+
+build() {
+	make -C "$kernel_srcdir" M="$builddir" modules
+}

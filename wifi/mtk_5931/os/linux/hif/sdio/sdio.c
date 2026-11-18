@@ -631,6 +631,9 @@ static int mtk_sdio_probe (
     if (pfWlanProbe((PVOID)func) != WLAN_STATUS_SUCCESS) {
         //printk(KERN_WARNING DRV_NAME"pfWlanProbe fail!call pfWlanRemove()\n");
         pfWlanRemove();
+        sdio_claim_host(func);
+        sdio_disable_func(func);
+        sdio_release_host(func);
         ret = -1;
     }
     else {

@@ -846,7 +846,14 @@ struct _GLUE_INFO_T {
 
     UINT_32                 u4ReqIeLength;
     UINT_8                  aucReqIe[CFG_CFG80211_IE_BUF_LEN];
+
+    /* cfg80211 SME state, tracked by the driver (wdev->sme_state is gone) */
+    UINT_8                  eConnState;
 };
+
+#define MTK_CONN_IDLE           0
+#define MTK_CONN_CONNECTING     1
+#define MTK_CONN_CONNECTED      2
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 0)
     /* linux 2.4 */
@@ -873,7 +880,7 @@ typedef struct _SUB_MODULE_HANDLER {
 
 #endif
 
-#if CONFIG_NL80211_TESTMODE
+#ifdef CONFIG_NL80211_TESTMODE
 
 typedef struct _NL80211_DRIVER_TEST_MODE_PARAMS {
 	UINT_32  index;

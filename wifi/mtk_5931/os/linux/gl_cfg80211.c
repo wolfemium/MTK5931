@@ -73,8 +73,8 @@
 #include "gl_os.h"
 #include "debug.h"
 #include "wlan_lib.h"
-#include "gl_wext.h"
 #include "precomp.h"
+#include "gl_cfg80211.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -117,6 +117,35 @@
 ********************************************************************************
 */
 
+/* WPS IE search (was wextSrchDesiredWPSIE in the dropped gl_wext.c) */
+static BOOLEAN
+cfgSrchDesiredWPSIE(PUINT_8 pucIEStart, INT_32 i4TotalIeLen,
+    UINT_8 ucDesiredElemId, PUINT_8 *ppucDesiredIE)
+{
+    INT_32 i4InfoElemLen;
+
+    while (i4TotalIeLen >= 2) {
+        i4InfoElemLen = (INT_32) pucIEStart[1] + 2;
+
+        if (pucIEStart[0] == ucDesiredElemId && i4InfoElemLen <= i4TotalIeLen) {
+            if (ucDesiredElemId != 0xDD) {
+                *ppucDesiredIE = &pucIEStart[0];
+                return TRUE;
+            }
+            if (pucIEStart[1] >= 4 &&
+                memcmp(&pucIEStart[2], "\x00\x50\xf2\x04", 4) == 0) {
+                *ppucDesiredIE = &pucIEStart[0];
+                return TRUE;
+            }
+        }
+
+        i4TotalIeLen -= i4InfoElemLen;
+        pucIEStart += i4InfoElemLen;
+    }
+
+    return FALSE;
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief This routine is responsible for change STA type between
@@ -134,7 +163,6 @@ mtk_cfg80211_change_iface (
     struct wiphy *wiphy,
     struct net_device *ndev,
     enum nl80211_iftype type,
-    u32 *flags,
     struct vif_params *params
     )
 {
@@ -197,7 +225,8 @@ mtk_cfg80211_change_iface (
 int
 mtk_cfg80211_add_key (
     struct wiphy *wiphy,
-    struct net_device *ndev,
+    struct wireless_dev *wdev,
+    int link_id,
     u8 key_index,
     bool pairwise,
     const u8 *mac_addr,
@@ -259,7 +288,7 @@ mtk_cfg80211_add_key (
     }
 
     rKey.u4KeyLength = params->key_len;
-    rKey.u4Length =  ((UINT_32)&(((P_P2P_PARAM_KEY_T)0)->aucKeyMaterial)) + rKey.u4KeyLength;
+    rKey.u4Length =  ((UINT_32)offsetof(PARAM_KEY_T, aucKeyMaterial)) + rKey.u4KeyLength;
     
     rStatus = kalIoctl(prGlueInfo,
             wlanoidSetAddKey,
@@ -291,7 +320,8 @@ mtk_cfg80211_add_key (
 int 
 mtk_cfg80211_get_key (
     struct wiphy *wiphy,
-    struct net_device *ndev,
+    struct wireless_dev *wdev,
+    int link_id,
     u8 key_index,
     bool pairwise,
     const u8 *mac_addr,
@@ -327,7 +357,8 @@ mtk_cfg80211_get_key (
 int
 mtk_cfg80211_del_key (
     struct wiphy *wiphy,
-    struct net_device *ndev,
+    struct wireless_dev *wdev,
+    int link_id,
     u8 key_index,
     bool pairwise,
     const u8 *mac_addr
@@ -384,6 +415,7 @@ int
 mtk_cfg80211_set_default_key (
     struct wiphy *wiphy,
     struct net_device *ndev,
+    int link_id,
     u8 key_index,
     bool unicast,
     bool multicast
@@ -398,9 +430,9 @@ mtk_cfg80211_set_default_key (
     printk("--> %s()\n", __func__);
 #endif
 
-    /* not implemented */
+    /* the firmware tracks the TX key itself */
 
-    return -EINVAL;
+    return 0;
 }
 
 
@@ -418,8 +450,8 @@ mtk_cfg80211_set_default_key (
 int
 mtk_cfg80211_get_station (
     struct wiphy *wiphy,
-    struct net_device *ndev,
-    u8 *mac,
+    struct wireless_dev *wdev,
+    const u8 *mac,
     struct station_info *sinfo
     )
 {
@@ -462,7 +494,7 @@ mtk_cfg80211_get_station (
         DBGLOG(REQ, WARN, ("unable to retrieve link speed\n"));
     }
     else {
-        sinfo->filled |= STATION_INFO_TX_BITRATE;
+        sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BITRATE);
         sinfo->txrate.legacy = u4Rate / 1000; /* convert from 100bps to 100kbps */
     }
 
@@ -486,7 +518,7 @@ mtk_cfg80211_get_station (
             DBGLOG(REQ, WARN, ("unable to retrieve link speed\n"));
         }
         else {
-            sinfo->filled |= STATION_INFO_SIGNAL;
+            sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
             sinfo->signal = i4Rssi; /* dBm */
         }
     }
@@ -508,7 +540,6 @@ mtk_cfg80211_get_station (
 int 
 mtk_cfg80211_scan (
     struct wiphy *wiphy,
-    struct net_device *ndev,
     struct cfg80211_scan_request *request
     )
 {
@@ -757,7 +788,7 @@ mtk_cfg80211_connect (
         }
 #endif
 #if CFG_SUPPORT_WPS2
-        if (wextSrchDesiredWPSIE(sme->ie,
+        if (cfgSrchDesiredWPSIE((PUINT_8)sme->ie,
                     sme->ie_len,
                     0xDD,
                     (PUINT_8 *)&prDesiredIE)) {
@@ -841,7 +872,7 @@ mtk_cfg80211_connect (
     if (sme->key_len != 0 && prGlueInfo->rWpaInfo.u4WpaVersion == IW_AUTH_WPA_VERSION_DISABLED) {
         P_PARAM_WEP_T prWepKey = (P_PARAM_WEP_T) wepBuf;
         
-        kalMemSet(prWepKey, 0, sizeof(prWepKey));
+        kalMemSet(prWepKey, 0, sizeof(wepBuf));
         prWepKey->u4Length = 12 + sme->key_len;
         prWepKey->u4KeyLength = (UINT_32) sme->key_len;
         prWepKey->u4KeyIndex = (UINT_32) sme->key_idx;
@@ -868,6 +899,8 @@ mtk_cfg80211_connect (
         }
     }
 
+    prGlueInfo->eConnState = MTK_CONN_CONNECTING;
+
     if(sme->ssid_len > 0) {
         /* connect by SSID */
         COPY_SSID(rNewSsid.aucSsid, rNewSsid.u4SsidLen, sme->ssid, sme->ssid_len);
@@ -884,6 +917,7 @@ mtk_cfg80211_connect (
 
         if (rStatus != WLAN_STATUS_SUCCESS) {
             DBGLOG(REQ, WARN, ("set SSID:%lx\n", rStatus));
+            prGlueInfo->eConnState = MTK_CONN_IDLE;
             return -EINVAL;
         }
     }
@@ -892,7 +926,7 @@ mtk_cfg80211_connect (
         rStatus = kalIoctl(prGlueInfo,
                 wlanoidSetBssid,
                 (PVOID) sme->bssid,
-                sizeof(MAC_ADDR_LEN),
+                MAC_ADDR_LEN,
                 FALSE,
                 FALSE,
                 TRUE,
@@ -901,6 +935,7 @@ mtk_cfg80211_connect (
 
         if (rStatus != WLAN_STATUS_SUCCESS) {
             DBGLOG(REQ, WARN, ("set BSSID:%lx\n", rStatus));
+            prGlueInfo->eConnState = MTK_CONN_IDLE;
             return -EINVAL;
         }
     }
@@ -980,8 +1015,8 @@ mtk_cfg80211_join_ibss (
     ASSERT(prGlueInfo);
 
     /* set channel */
-    if(params->channel) {
-        u4ChnlFreq = nicChannelNum2Freq(params->channel->hw_value);
+    if(params->chandef.chan) {
+        u4ChnlFreq = nicChannelNum2Freq(params->chandef.chan->hw_value);
 
         rStatus = kalIoctl(prGlueInfo,
                            wlanoidSetFrequency,
@@ -1252,335 +1287,4 @@ mtk_cfg80211_flush_pmksa (
     return 0;
 }
 
-
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This routine is responsible for requesting to stay on a 
- *        specified channel
- *
- * @param 
- *
- * @retval 0:       successful
- *         others:  failure
- */
-/*----------------------------------------------------------------------------*/
-int 
-mtk_cfg80211_remain_on_channel (
-    struct wiphy *wiphy,
-    struct net_device *ndev,
-    struct ieee80211_channel *chan,
-    enum nl80211_channel_type channel_type,
-    unsigned int duration,
-    u64 *cookie
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-    ASSERT(prGlueInfo);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    /* not implemented */
-
-    return -EINVAL;
-}
-
-
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This routine is responsible for requesting to cancel staying 
- *        on a specified channel
- *
- * @param 
- *
- * @retval 0:       successful
- *         others:  failure
- */
-/*----------------------------------------------------------------------------*/
-int
-mtk_cfg80211_cancel_remain_on_channel (
-    struct wiphy *wiphy,
-    struct net_device *ndev,
-    u64 cookie
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-    ASSERT(prGlueInfo);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    /* not implemented */
-
-    return -EINVAL;
-}
-
-
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This routine is responsible for requesting to send a management frame
- *
- * @param 
- *
- * @retval 0:       successful
- *         others:  failure
- */
-/*----------------------------------------------------------------------------*/
-int
-mtk_cfg80211_mgmt_tx (
-    struct wiphy *wiphy,
-    struct net_device *ndev,
-    struct ieee80211_channel *channel,
-    bool offscan,
-    enum nl80211_channel_type channel_type,
-    bool channel_type_valid,
-    unsigned int wait,
-    const u8 *buf,
-    size_t len,
-    bool no_cck,
-    bool dont_wait_for_ack,
-    u64 *cookie
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-    ASSERT(prGlueInfo);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    /* not implemented */
-
-    return -EINVAL;
-}
-
-
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This routine is responsible for requesting to cancel the wait time
- *        from transmitting a management frame on another channel
- *
- * @param 
- *
- * @retval 0:       successful
- *         others:  failure
- */
-/*----------------------------------------------------------------------------*/
-int
-mtk_cfg80211_mgmt_tx_cancel_wait (
-    struct wiphy *wiphy,
-    struct net_device *ndev,
-    u64 cookie
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-    ASSERT(prGlueInfo);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    /* not implemented */
-
-    return -EINVAL;
-}
-
-
-#if CONFIG_NL80211_TESTMODE
-
-#if CFG_SUPPORT_WAPI
-int
-mtk_cfg80211_testmode_set_key_ext(
-    IN struct wiphy *wiphy,
-    IN void *data,
-    IN int len)
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-    P_NL80211_DRIVER_SET_KEY_EXTS prParams = (P_NL80211_DRIVER_SET_KEY_EXTS)NULL;
-    struct iw_encode_exts *prIWEncExt = (struct iw_encode_exts *)NULL;
-    WLAN_STATUS rstatus = WLAN_STATUS_SUCCESS;
-    int     fgIsValid = 0;
-    UINT_32 u4BufLen = 0;
-    
-    P_PARAM_WPI_KEY_T prWpiKey = (P_PARAM_WPI_KEY_T) keyStructBuf;
-    memset(keyStructBuf, 0, sizeof(keyStructBuf));
-
-    ASSERT(wiphy);
-    
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-#if 1
-        printk("--> %s()\n", __func__);
-#endif
-
-    if(data && len) {
-        prParams = (P_NL80211_DRIVER_SET_KEY_EXTS)data;
-    }
-    
-    if(prParams) {
-        prIWEncExt = (struct iw_encode_exts *) &prParams->ext;
-    }
-
-    if (prIWEncExt->alg == IW_ENCODE_ALG_SMS4) {
-        /* KeyID */
-        prWpiKey->ucKeyID = prParams->key_index;
-        prWpiKey->ucKeyID --;
-        if (prWpiKey->ucKeyID > 1) {
-            /* key id is out of range */
-            //printk(KERN_INFO "[wapi] add key error: key_id invalid %d\n", prWpiKey->ucKeyID);
-            return -EINVAL;
-        }
-
-        if (prIWEncExt->key_len != 32) {
-            /* key length not valid */
-            //printk(KERN_INFO "[wapi] add key error: key_len invalid %d\n", prIWEncExt->key_len);
-            return -EINVAL;
-        }
-
-        //printk(KERN_INFO "[wapi] %d ext_flags %d\n", prEnc->flags, prIWEncExt->ext_flags);
-
-        if (prIWEncExt->ext_flags & IW_ENCODE_EXT_GROUP_KEY) {
-            prWpiKey->eKeyType = ENUM_WPI_GROUP_KEY;
-            prWpiKey->eDirection = ENUM_WPI_RX;
-        }
-        else if (prIWEncExt->ext_flags & IW_ENCODE_EXT_SET_TX_KEY) {
-            prWpiKey->eKeyType = ENUM_WPI_PAIRWISE_KEY;
-            prWpiKey->eDirection = ENUM_WPI_RX_TX;
-        }
-
-//#if CFG_SUPPORT_WAPI
-        //handle_sec_msg_final(prIWEncExt->key, 32, prIWEncExt->key, NULL);
-//#endif
-        /* PN */
-        memcpy(prWpiKey->aucPN, prIWEncExt->tx_seq, IW_ENCODE_SEQ_MAX_SIZE * 2);
-
-        /* BSSID */
-        memcpy(prWpiKey->aucAddrIndex, prIWEncExt->addr, 6);
-
-        memcpy(prWpiKey->aucWPIEK, prIWEncExt->key, 16);
-        prWpiKey->u4LenWPIEK = 16;
-
-        memcpy(prWpiKey->aucWPICK, &prIWEncExt->key[16], 16);
-        prWpiKey->u4LenWPICK = 16;
-
-        rstatus = kalIoctl(prGlueInfo,
-                     wlanoidSetWapiKey,
-                     prWpiKey,
-                     sizeof(PARAM_WPI_KEY_T),
-                     FALSE,
-                     FALSE,
-                     TRUE,
-                     FALSE,
-                     &u4BufLen);
-
-        if (rstatus != WLAN_STATUS_SUCCESS) {
-            //printk(KERN_INFO "[wapi] add key error:%lx\n", rStatus);
-            fgIsValid = -EFAULT;
-        }
-
-    }
-    return fgIsValid;
-}
-#endif
-
-
-int
-mtk_cfg80211_testmode_sw_cmd(
-    IN struct wiphy *wiphy,
-    IN void *data,
-    IN int len)
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-    P_NL80211_DRIVER_SW_CMD_PARAMS prParams = (P_NL80211_DRIVER_SW_CMD_PARAMS)NULL;
-    WLAN_STATUS rstatus = WLAN_STATUS_SUCCESS;
-    int     fgIsValid = 0;
-    UINT_32 u4SetInfoLen = 0;
-
-    ASSERT(wiphy);
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-
-#if 1
-        printk("--> %s()\n", __func__);
-#endif
-
-    if(data && len)
-        prParams = (P_NL80211_DRIVER_SW_CMD_PARAMS)data;
-
-    if(prParams) {
-        if(prParams->set == 1){
-            rstatus = kalIoctl(prGlueInfo,
-                    (PFN_OID_HANDLER_FUNC)wlanoidSetSwCtrlWrite,
-                    &prParams->adr,
-                    (UINT_32)8,
-                    FALSE,
-                    FALSE,
-                    TRUE,
-                    FALSE,
-                    &u4SetInfoLen);
-        }
-    }
-
-    if (WLAN_STATUS_SUCCESS != rstatus) {
-        fgIsValid = -EFAULT;
-    }
- 
-    return fgIsValid;
-}
-
-int mtk_cfg80211_testmode_cmd(
-    IN struct wiphy *wiphy,
-    IN void *data,
-    IN int len
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-    P_NL80211_DRIVER_TEST_MODE_PARAMS prParams = (P_NL80211_DRIVER_TEST_MODE_PARAMS)NULL;
-    BOOLEAN fgIsValid = 0;
-
-    ASSERT(wiphy);
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    if(data && len)
-        prParams = (P_NL80211_DRIVER_TEST_MODE_PARAMS)data;
-        
-    /* Clear the version byte */
-    prParams->index = prParams->index & ~ BITS(24,31);
-    
-    if(prParams){
-        switch(prParams->index){
-            case 1: /* SW cmd */
-                if(mtk_cfg80211_testmode_sw_cmd(wiphy, data, len))
-                    fgIsValid = TRUE;
-                break;
-            case 2: /* WAPI */
-#if CFG_SUPPORT_WAPI
-                if(mtk_cfg80211_testmode_set_key_ext(wiphy, data, len))
-                    fgIsValid = TRUE;
-#endif
-                break;
-            default:
-                fgIsValid = TRUE;
-                break;
-        }
-    }
-
-
-    return fgIsValid;
-}
-#endif
 

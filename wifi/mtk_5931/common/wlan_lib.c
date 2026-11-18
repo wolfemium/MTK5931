@@ -1422,7 +1422,17 @@ wlanAdapterStart (
 
                 /* 1.0 whole-chip reset except HIFSYS */
                 HAL_MCR_WR(prAdapter, MCR_WMCSR, WMCSR_CHIP_RST);
-                HAL_MCR_WR(prAdapter, MCR_WMCSR, 0);
+                {
+                    int rst_try;
+                    for (rst_try = 0; rst_try < 10; rst_try++) {
+                        kalMsleep(10);
+                        if (kalDevRegWrite(prAdapter->prGlueInfo, MCR_WMCSR, 0))
+                            break;
+                    }
+                    if (rst_try == 10) {
+                        HAL_MCR_WR(prAdapter, MCR_WMCSR, 0);
+                    }
+                }
 
                 /* 1.0.1 delay for EEIF ready */
                 kalMsleep(RESET_RDY_INTERVAL);

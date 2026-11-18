@@ -2106,7 +2106,7 @@ kalRandomNumber(
     );
 
 VOID
-kalTimeoutHandler (unsigned long arg);
+kalTimeoutHandler (struct timer_list *t);
 
 VOID
 kalSetEvent (P_GLUE_INFO_T pr);
