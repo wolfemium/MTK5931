@@ -401,39 +401,6 @@ mtk_cfg80211_del_key (
 }
 
 
-/*----------------------------------------------------------------------------*/
-/*!
- * @brief This routine is responsible for setting default key on an interface
- *
- * @param 
- *
- * @retval 0:       successful
- *         others:  failure
- */
-/*----------------------------------------------------------------------------*/
-int 
-mtk_cfg80211_set_default_key (
-    struct wiphy *wiphy,
-    struct net_device *ndev,
-    int link_id,
-    u8 key_index,
-    bool unicast,
-    bool multicast
-    )
-{
-    P_GLUE_INFO_T prGlueInfo = NULL;
-
-    prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
-    ASSERT(prGlueInfo);
-
-#if 1
-    printk("--> %s()\n", __func__);
-#endif
-
-    /* the firmware tracks the TX key itself */
-
-    return 0;
-}
 
 
 /*----------------------------------------------------------------------------*/
@@ -899,7 +866,10 @@ mtk_cfg80211_connect (
         }
     }
 
-    prGlueInfo->eConnState = MTK_CONN_CONNECTING;
+    /* An established link stays established until the firmware reports loss.
+     * A successful reassociation is reported as a roam, not a new connect.
+     */
+    cmpxchg(&prGlueInfo->eConnState, MTK_CONN_IDLE, MTK_CONN_CONNECTING);
 
     if(sme->ssid_len > 0) {
         /* connect by SSID */
@@ -917,7 +887,7 @@ mtk_cfg80211_connect (
 
         if (rStatus != WLAN_STATUS_SUCCESS) {
             DBGLOG(REQ, WARN, ("set SSID:%lx\n", rStatus));
-            prGlueInfo->eConnState = MTK_CONN_IDLE;
+            cmpxchg(&prGlueInfo->eConnState, MTK_CONN_CONNECTING, MTK_CONN_IDLE);
             return -EINVAL;
         }
     }
@@ -935,7 +905,7 @@ mtk_cfg80211_connect (
 
         if (rStatus != WLAN_STATUS_SUCCESS) {
             DBGLOG(REQ, WARN, ("set BSSID:%lx\n", rStatus));
-            prGlueInfo->eConnState = MTK_CONN_IDLE;
+            cmpxchg(&prGlueInfo->eConnState, MTK_CONN_CONNECTING, MTK_CONN_IDLE);
             return -EINVAL;
         }
     }
@@ -983,6 +953,11 @@ mtk_cfg80211_disconnect (
         DBGLOG(REQ, WARN, ("disassociate error:%lx\n", rStatus));
         return -EFAULT;
     }
+
+    if (cmpxchg(&prGlueInfo->eConnState, MTK_CONN_CONNECTING,
+                MTK_CONN_IDLE) == MTK_CONN_CONNECTING)
+        cfg80211_connect_timeout(ndev, NULL, NULL, 0, GFP_KERNEL,
+                                 NL80211_TIMEOUT_UNSPECIFIED);
 
     return 0;
 }

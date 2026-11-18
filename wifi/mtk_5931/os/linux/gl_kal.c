@@ -1255,6 +1255,7 @@ kalIndicateStatusAndComplete (
         (P_PARAM_PMKID_CANDIDATE_LIST_T) (pStatus + 1);
     PARAM_MAC_ADDRESS arBssid;
     struct cfg80211_scan_request *prScanRequest = NULL;
+    UINT_8 conn_state;
     GLUE_SPIN_LOCK_DECLARATION();
 
     kalMemZero(arBssid, MAC_ADDR_LEN);
@@ -1298,8 +1299,8 @@ kalIndicateStatusAndComplete (
         if(prGlueInfo->fgIsRegistered == TRUE) {
             /* CFG80211 Indication */
             if(eStatus == WLAN_STATUS_MEDIA_CONNECT
-                    && prGlueInfo->eConnState == MTK_CONN_CONNECTING) {
-                prGlueInfo->eConnState = MTK_CONN_CONNECTED;
+                    && cmpxchg(&prGlueInfo->eConnState, MTK_CONN_CONNECTING,
+                               MTK_CONN_CONNECTED) == MTK_CONN_CONNECTING) {
                 cfg80211_connect_result(prGlueInfo->prDevHandler,
                         arBssid,
                         prGlueInfo->aucReqIe,
@@ -1309,7 +1310,7 @@ kalIndicateStatusAndComplete (
                         WLAN_STATUS_SUCCESS,
                         GFP_KERNEL);
             }
-            else if(prGlueInfo->eConnState == MTK_CONN_CONNECTED) {
+            else if(READ_ONCE(prGlueInfo->eConnState) == MTK_CONN_CONNECTED) {
                 struct ieee80211_channel *prChannel = NULL;
                 struct cfg80211_roam_info rRoamInfo = {};
                 UINT_8 ucChannelNum = wlanGetChannelNumberByNetwork(prGlueInfo->prAdapter, NETWORK_TYPE_AIS_INDEX);
@@ -1347,19 +1348,19 @@ kalIndicateStatusAndComplete (
 #endif
 
         netif_carrier_off(prGlueInfo->prDevHandler);
+        conn_state = xchg(&prGlueInfo->eConnState, MTK_CONN_IDLE);
 
         if(prGlueInfo->fgIsRegistered == TRUE) {
             /* CFG80211 Indication */
-            if(prGlueInfo->eConnState == MTK_CONN_CONNECTED) {
+            if(conn_state == MTK_CONN_CONNECTED) {
                 cfg80211_disconnected(prGlueInfo->prDevHandler, 0, NULL, 0, FALSE, GFP_KERNEL);
             }
-            else if(prGlueInfo->eConnState == MTK_CONN_CONNECTING) {
+            else if(conn_state == MTK_CONN_CONNECTING) {
                 cfg80211_connect_result(prGlueInfo->prDevHandler, NULL,
                         NULL, 0, NULL, 0,
                         WLAN_STATUS_UNSPECIFIED_FAILURE, GFP_KERNEL);
             }
         }
-        prGlueInfo->eConnState = MTK_CONN_IDLE;
 
         prGlueInfo->eParamMediaStateIndicated = PARAM_MEDIA_STATE_DISCONNECTED;
 

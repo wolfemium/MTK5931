@@ -847,7 +847,6 @@ static struct cfg80211_ops mtk_wlan_ops = {
     .add_key                = mtk_cfg80211_add_key,
     .get_key                = mtk_cfg80211_get_key,
     .del_key                = mtk_cfg80211_del_key,
-    .set_default_key        = mtk_cfg80211_set_default_key,
     .get_station            = mtk_cfg80211_get_station,
     .scan                   = mtk_cfg80211_scan,
     .connect                = mtk_cfg80211_connect,
@@ -858,9 +857,6 @@ static struct cfg80211_ops mtk_wlan_ops = {
     .set_pmksa              = mtk_cfg80211_set_pmksa,
     .del_pmksa              = mtk_cfg80211_del_pmksa,
     .flush_pmksa            = mtk_cfg80211_flush_pmksa,
-    #ifdef CONFIG_NL80211_TESTMODE
-    .testmode_cmd               = mtk_cfg80211_testmode_cmd,
-    #endif
 };
 
 /*******************************************************************************
@@ -1949,6 +1945,7 @@ wlanNetRegister(
             DBGLOG(INIT, ERROR, ("wlanNetRegister: wiphy context is not registered.\n"));
             wlanClearDevIdx(prWdev->netdev);
             i4DevIdx = -1;
+            break;
         }
 
         if(register_netdev(prWdev->netdev) < 0) {
@@ -2501,6 +2498,7 @@ wlanProbe(
     INT_32 i4Status = 0;
     BOOL bRet = FALSE;
     BOOLEAN fgIrqClaimed = FALSE;
+    BOOLEAN fgAdapterStarted = FALSE;
 
 
     do {
@@ -2646,7 +2644,13 @@ bailout:
             break;
         }
 #endif
+        fgAdapterStarted = TRUE;
         prGlueInfo->main_thread = kthread_run(tx_thread, prGlueInfo->prDevHandler, "tx_thread");
+        if (IS_ERR(prGlueInfo->main_thread)) {
+            i4Status = PTR_ERR(prGlueInfo->main_thread);
+            prGlueInfo->main_thread = NULL;
+            break;
+        }
 
         /* set MAC address */
         {
@@ -2736,8 +2740,19 @@ bailout:
     }
     while (FALSE);
 
-    if (i4Status != 0 && fgIrqClaimed && prWdev) {
-        glBusFreeIrq(prWdev->netdev, prGlueInfo);
+    if (i4Status != 0 && prWdev && !prGlueInfo->fgIsRegistered) {
+        if (fgIrqClaimed)
+            glBusFreeIrq(prWdev->netdev, prGlueInfo);
+        if (prGlueInfo->main_thread) {
+            set_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->u4Flag);
+            wake_up_interruptible(&prGlueInfo->waitq);
+            wait_for_completion(&prGlueInfo->rHaltComp);
+        }
+        if (fgAdapterStarted)
+            wlanAdapterStop(prAdapter);
+        sdio_set_drvdata(prGlueInfo->rHifInfo.func, NULL);
+        gPrDev = NULL;
+        wlanNetDestroy(prWdev);
     }
 
     return i4Status;

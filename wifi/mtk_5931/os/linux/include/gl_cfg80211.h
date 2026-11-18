@@ -121,9 +121,6 @@ int mtk_cfg80211_get_key(struct wiphy *wiphy, struct wireless_dev *wdev,
 int mtk_cfg80211_del_key(struct wiphy *wiphy, struct wireless_dev *wdev,
     int link_id, u8 key_index, bool pairwise, const u8 *mac_addr);
 
-int mtk_cfg80211_set_default_key(struct wiphy *wiphy, struct net_device *ndev,
-    int link_id, u8 key_index, bool unicast, bool multicast);
-
 int mtk_cfg80211_get_station(struct wiphy *wiphy, struct wireless_dev *wdev,
     const u8 *mac, struct station_info *sinfo);
 
@@ -151,11 +148,6 @@ int mtk_cfg80211_del_pmksa(struct wiphy *wiphy, struct net_device *ndev,
     struct cfg80211_pmksa *pmksa);
 
 int mtk_cfg80211_flush_pmksa(struct wiphy *wiphy, struct net_device *ndev);
-
-#ifdef CONFIG_NL80211_TESTMODE
-int mtk_cfg80211_testmode_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
-    void *data, int len);
-#endif
 
 
 /*******************************************************************************
