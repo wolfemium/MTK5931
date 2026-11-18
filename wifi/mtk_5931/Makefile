@@ -1,147 +1,24 @@
-# ---------------------------------------------------
-# Compile Options
-# ---------------------------------------------------
+# MediaTek MT5931 SDIO Wi-Fi, station mode via cfg80211.
+# Ported from the MediaTek/Rockchip vendor tree (2013) to mainline kernels for
+# the Rikomagic MK802 IV. Wi-Fi Direct, BT-over-Wi-Fi, WAPI and wireless
+# extensions are not built.
 
-#include $(MTK_PATH_BUILD)/Makefile
-#ccflags-y += -DLINUX -DMT6620
-ccflags-y += -DLINUX -DMT5931	##mark skynine modify DMT6620-->DMT5931
-
-ifeq ($(MTK_WAPI_SUPPORT), yes)
-    ccflags-y += -DCFG_SUPPORT_WAPI=1
-else
-    ccflags-y += -DCFG_SUPPORT_WAPI=0
-endif
-
-ifeq ($(HAVE_XLOG_FEATURE), yes)
-    ccflags-y += -DCFG_SUPPORT_XLOG=1
-else
-    ccflags-y += -DCFG_SUPPORT_XLOG=0
-endif
-
-ifeq ($(HAVE_AEE_FEATURE), yes)
-    ccflags-y += -DCFG_SUPPORT_AEE=1
-else
-    ccflags-y += -DCFG_SUPPORT_AEE=0
-endif
-
-#ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF_SDIO1), y)
-#    ccflags-y += -D_HIF_SDIO=1
-#endif
-
-MODULE_NAME := wlan_mt6620
-
-ccflags-y += -D_HIF_SDIO=1
-
-ccflags-y += -DDBG=0
+ccflags-y += -DLINUX -DMT5931 -D_HIF_SDIO=1 -DDBG=0
+ccflags-y += -DCFG_SUPPORT_WAPI=0 -DCFG_SUPPORT_XLOG=0 -DCFG_SUPPORT_AEE=0
 ccflags-y += -I$(src)/os -I$(src)/os/linux/include -I$(src)/os/linux/hif/sdio/include
 ccflags-y += -I$(src)/include -I$(src)/include/nic -I$(src)/include/mgmt
 
-#obj-$(CONFIG_MTK_COMBO_WIFI) += $(MODULE_NAME).o
-obj-$(CONFIG_MT5931) += $(MODULE_NAME).o
-#obj-m += $(MODULE_NAME).o
+obj-m += mt5931.o
 
-# ---------------------------------------------------
-# Directory List
-# ---------------------------------------------------
-COMMON_DIR  := common/
-OS_DIR      := os/linux/
-HIF_DIR	    := os/linux/hif/sdio/
-NIC_DIR     := nic/
-MGMT_DIR    := mgmt/
-
-
-# ---------------------------------------------------
-# Objects List
-# ---------------------------------------------------
-
-COMMON_OBJS :=	$(COMMON_DIR)dump.o \
-	       		$(COMMON_DIR)wlan_lib.o \
-	       		$(COMMON_DIR)wlan_oid.o \
-	       		$(COMMON_DIR)wlan_bow.o
-
-NIC_OBJS := $(NIC_DIR)nic.o \
-			$(NIC_DIR)nic_tx.o \
-			$(NIC_DIR)nic_rx.o \
-			$(NIC_DIR)nic_pwr_mgt.o \
-			$(NIC_DIR)cmd_buf.o \
-			$(NIC_DIR)que_mgt.o \
-			$(NIC_DIR)nic_cmd_event.o
-
-OS_OBJS :=	$(OS_DIR)gl_init.o \
-			$(OS_DIR)gl_kal.o  \
-			$(OS_DIR)gl_bow.o \
-			$(OS_DIR)gl_wext.o \
-			$(OS_DIR)gl_wext_priv.o \
-			$(OS_DIR)gl_rst.o \
-			$(OS_DIR)gl_cfg80211.o \
-			$(OS_DIR)platform.o
-
-MGMT_OBJS := $(MGMT_DIR)ais_fsm.o \
-			 $(MGMT_DIR)aaa_fsm.o \
-			 $(MGMT_DIR)assoc.o \
-			 $(MGMT_DIR)auth.o \
-			 $(MGMT_DIR)bss.o \
-			 $(MGMT_DIR)cnm.o \
-			 $(MGMT_DIR)cnm_timer.o \
-			 $(MGMT_DIR)cnm_mem.o \
-			 $(MGMT_DIR)hem_mbox.o \
-			 $(MGMT_DIR)mib.o \
-			 $(MGMT_DIR)privacy.o  \
-			 $(MGMT_DIR)rate.o \
-			 $(MGMT_DIR)rlm.o \
-			 $(MGMT_DIR)rlm_domain.o \
-			 $(MGMT_DIR)rlm_obss.o \
-			 $(MGMT_DIR)rlm_protection.o \
-			 $(MGMT_DIR)rsn.o \
-			 $(MGMT_DIR)saa_fsm.o \
-			 $(MGMT_DIR)scan.o \
-			 $(MGMT_DIR)scan_fsm.o \
-		 	 $(MGMT_DIR)sec_fsm.o \
-             $(MGMT_DIR)swcr.o \
-             $(MGMT_DIR)roaming_fsm.o
-                         
-# ---------------------------------------------------
-# P2P Objects List
-# ---------------------------------------------------      
-
-COMMON_OBJS += $(COMMON_DIR)wlan_p2p.o
-
-NIC_OBJS += $(NIC_DIR)p2p_nic.o
-
-OS_OBJS += $(OS_DIR)gl_p2p.o \
-           $(OS_DIR)gl_p2p_cfg80211.o \
-           $(OS_DIR)gl_p2p_init.o \
-           $(OS_DIR)gl_p2p_kal.o
-
-MGMT_OBJS += $(MGMT_DIR)p2p_assoc.o \
-             $(MGMT_DIR)p2p_bss.o \
-             $(MGMT_DIR)p2p_fsm.o \
-             $(MGMT_DIR)p2p_func.o \
-             $(MGMT_DIR)p2p_rlm.o \
-             $(MGMT_DIR)p2p_rlm_obss.o \
-             $(MGMT_DIR)p2p_scan.o \
-             $(MGMT_DIR)p2p_ie.o \
-             $(MGMT_DIR)p2p_state.o        
-                 
-
-ifeq ($(MTK_WAPI_SUPPORT), yes)
-MGMT_OBJS += $(MGMT_DIR)wapi.o
-endif
-
-ifeq ($(WLAN_PROC), y)
-OS_OBJS += gl_proc.o
-endif
-
-HIF_OBJS :=  $(HIF_DIR)arm.o \
-             $(HIF_DIR)sdio.o
-
-$(MODULE_NAME)-objs  += $(COMMON_OBJS)
-$(MODULE_NAME)-objs  += $(NIC_OBJS)
-$(MODULE_NAME)-objs  += $(OS_OBJS)
-$(MODULE_NAME)-objs  += $(HIF_OBJS)
-$(MODULE_NAME)-objs  += $(MGMT_OBJS)
-
-
-clean:
-	rm $(HIF_OBJS)	$(OS_OBJS) $(NIC_OBJS) $(MGMT_OBJS) $(COMMON_OBJS)
-
+mt5931-y := \
+	common/dump.o common/wlan_lib.o common/wlan_oid.o \
+	nic/nic.o nic/nic_tx.o nic/nic_rx.o nic/nic_pwr_mgt.o nic/cmd_buf.o \
+	nic/que_mgt.o nic/nic_cmd_event.o \
+	os/linux/gl_init.o os/linux/gl_kal.o os/linux/gl_rst.o \
+	os/linux/gl_cfg80211.o os/linux/platform.o \
+	os/linux/hif/sdio/arm.o os/linux/hif/sdio/sdio.o \
+	mgmt/ais_fsm.o mgmt/aaa_fsm.o mgmt/assoc.o mgmt/auth.o mgmt/bss.o \
+	mgmt/cnm.o mgmt/cnm_timer.o mgmt/cnm_mem.o mgmt/hem_mbox.o mgmt/mib.o \
+	mgmt/privacy.o mgmt/rate.o mgmt/rlm.o mgmt/rlm_domain.o mgmt/rlm_obss.o \
+	mgmt/rlm_protection.o mgmt/rsn.o mgmt/saa_fsm.o mgmt/scan.o \
+	mgmt/scan_fsm.o mgmt/sec_fsm.o mgmt/swcr.o mgmt/roaming_fsm.o

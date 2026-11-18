@@ -500,13 +500,6 @@
 
 #define DRV_NAME "["CHIP_NAME"]: "
 
-/* Define if target platform is Android.
- * It should already be defined in Android kernel source
- */
-#ifndef CONFIG_ANDROID
-#define CONFIG_ANDROID      0
-#endif
-
 /* for CFG80211 IE buffering mechanism */
 #define CFG_CFG80211_IE_BUF_LEN     (512)
 
@@ -522,9 +515,7 @@
 #include <linux/jiffies.h>      /* jiffies */
 #include <linux/delay.h>        /* udelay and mdelay macro */
 
-#if CONFIG_ANDROID
-#include <linux/wakelock.h>
-#endif
+/* mk802iv port: Android wakelock support removed */
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 12)
 #include <linux/irq.h>          /* IRQT_FALLING */
@@ -564,10 +555,6 @@
 
 
 #include <asm/io.h>             /* readw and writew */
-
-#if WIRELESS_EXT > 12
-#include <net/iw_handler.h>
-#endif
 
 #include "version.h"
 #include "config.h"
